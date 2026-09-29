@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Smart Home Electricity Manager</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;700&family=Figtree:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root{--bg:#0a1418;--surface:#12212a;--surface2:#183038;--line:#25404b;--text:#e6f1f2;--muted:#8fabb2;--amber:#f5b83d;--green:#3ddc97;--red:#ff5d6c;--warn:#ffb020}
+  html,body{background:var(--bg);color:var(--text);font-family:'Figtree',system-ui,sans-serif}
+  .display{font-family:'Bricolage Grotesque','Figtree',system-ui,sans-serif;letter-spacing:-.02em}
+  .panel{background:var(--surface);border:1px solid var(--line);border-radius:14px}
+  .led{width:10px;height:10px;border-radius:50%;display:inline-block;flex:none}
+  .led.g{background:var(--green);box-shadow:0 0 8px var(--green)}
+  .led.r{background:var(--red);box-shadow:0 0 8px var(--red)}
+  .led.a{background:var(--warn);box-shadow:0 0 8px var(--warn);animation:blink .7s infinite alternate}
+  @keyframes blink{from{opacity:.35}to{opacity:1}}
+  .sw{position:relative;width:52px;height:28px;border-radius:99px;background:#2b3f47;border:1px solid var(--line);transition:background .2s;flex:none;cursor:pointer}
+  .sw::after{content:"";position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:#cfe0e3;transition:transform .2s}
+  .sw[aria-checked="true"]{background:var(--green);border-color:var(--green)}
+  .sw[aria-checked="true"]::after{transform:translateX(24px);background:#062015}
+  .btn{border:1px solid var(--line);background:var(--surface2);border-radius:10px;padding:.55rem .8rem;font-weight:600;font-size:.875rem;transition:background .15s,border-color .15s;cursor:pointer}
+  .btn:hover{border-color:var(--amber)}
+  .btn.warn{border-color:var(--warn);color:var(--warn)}
+  :focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+  .pill{border-radius:99px;padding:.15rem .6rem;font-size:.75rem;font-weight:600;display:inline-flex;gap:.4rem;align-items:center}
+  .bar{height:6px;border-radius:9px;background:#0d1a20;overflow:hidden}
+  .bar>i{display:block;height:100%;background:var(--warn);width:0;transition:width .2s linear}
+  .log-item{border-left:3px solid var(--line);padding:.45rem .7rem;background:#0f1c23;border-radius:0 8px 8px 0;animation:slide .25s ease-out}
+  .log-item.warn{border-left-color:var(--warn)}.log-item.ok{border-left-color:var(--green)}.log-item.bad{border-left-color:var(--red)}
+  @keyframes slide{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+  #log{max-height:300px;overflow-y:auto}
+  @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body class="min-h-screen">
+<div class="max-w-7xl mx-auto px-4 sm:px-6 py-6">
+
+  <header class="flex flex-wrap items-center justify-between gap-3 mb-6">
+    <div>
+      <h1 class="display text-2xl sm:text-3xl font-bold">Smart Home Electricity Manager</h1>
+      <p class="text-sm" style="color:var(--muted)">Live telemetry from IoT smart plug nodes · Smart India Hackathon prototype</p>
+    </div>
+    <div class="flex items-center gap-3 text-sm" style="color:var(--muted)">
+      <span class="led g" aria-hidden="true"></span><span>Gateway connected</span>
+      <span id="clock" class="display text-base" style="color:var(--text)"></span>
+    </div>
+  </header>
+
+  <!-- Metrics -->
+  <section class="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-6" aria-label="Key metrics">
+    <div class="panel p-4">
+      <p class="text-sm" style="color:var(--muted)">Live power draw</p>
+      <p class="display text-3xl sm:text-4xl font-bold mt-1"><span id="mPower">0</span> <span class="text-lg" style="color:var(--amber)">W</span></p>
+      <p class="text-xs mt-1" style="color:var(--muted)" id="mAmps">0.00 A at 230 V</p>
+    </div>
+    <div class="panel p-4">
+      <p class="text-sm" style="color:var(--muted)">Energy used today</p>
+      <p class="display text-3xl sm:text-4xl font-bold mt-1"><span id="mKwh">0.000</span> <span class="text-lg" style="color:var(--amber)">kWh</span></p>
+      <p class="text-xs mt-1" style="color:var(--muted)">Since midnight</p>
+    </div>
+    <div class="panel p-4">
+      <p class="text-sm" style="color:var(--muted)">Estimated cost today</p>
+      <p class="display text-3xl sm:text-4xl font-bold mt-1"><span style="color:var(--amber)">₹</span><span id="mCost">0.00</span></p>
+      <p class="text-xs mt-1" style="color:var(--muted)" id="mRate">Current rate ₹0.00/kWh</p>
+    </div>
+    <div class="panel p-4">
+      <p class="text-sm" style="color:var(--muted)">Active nodes</p>
+      <p class="display text-3xl sm:text-4xl font-bold mt-1"><span id="mNodes">4/5</span> <span class="text-base font-medium" style="color:var(--muted)">plugs connected</span></p>
+      <div class="flex gap-1.5 mt-2" id="nodeLeds" aria-hidden="true"></div>
+    </div>
+  </section>
+
+  <!-- Chart + Analytics -->
+  <section class="grid lg:grid-cols-3 gap-4 mb-6">
+    <div class="panel p-4 lg:col-span-2">
+      <div class="flex items-center justify-between mb-2">
+        <h2 class="display text-lg font-bold">Live power vs time</h2>
+        <span class="text-xs" style="color:var(--muted)">Updates every 2 seconds</span>
+      </div>
+      <div style="height:280px"><canvas id="chart" aria-label="Live power in watts over time" role="img"></canvas></div>
+    </div>
+
+    <div class="panel p-4">
+      <div class="flex items-center justify-between mb-1">
+        <h2 class="display text-lg font-bold">Time-of-day tariff</h2>
+        <span id="todBadge" class="pill"></span>
+      </div>
+      <p class="text-xs mb-3" style="color:var(--muted)">Hourly rate across the day. Current hour is outlined.</p>
+      <div class="flex items-end gap-[3px] h-24" id="tod" aria-hidden="true"></div>
+      <div class="flex justify-between text-[11px] mt-1" style="color:var(--muted)"><span>12 am</span><span>6 am</span><span>12 pm</span><span>6 pm</span><span>11 pm</span></div>
+      <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs mt-3" style="color:var(--muted)">
+        <span><span class="led g" style="width:8px;height:8px;box-shadow:none"></span> Off-peak ₹4.50</span>
+        <span><span class="led a" style="width:8px;height:8px;box-shadow:none;animation:none"></span> Standard ₹6.50</span>
+        <span><span class="led r" style="width:8px;height:8px;box-shadow:none"></span> Peak ₹9.00</span>
+      </div>
+      <div class="mt-4 pt-3" style="border-top:1px solid var(--line)">
+        <p class="text-sm" style="color:var(--muted)">Estimated monthly savings</p>
+        <p class="display text-3xl font-bold" style="color:var(--green)">₹<span id="mSave">0</span></p>
+        <p class="text-xs mt-1" style="color:var(--muted)">₹<span id="sShift">0</span> from shifting loads to off-peak · ₹<span id="sWaste">0</span> from automatic cut-off</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Plug nodes -->
+  <section class="mb-6" aria-label="Smart plug nodes">
+    <h2 class="display text-lg font-bold mb-3">Smart plug nodes</h2>
+    <div class="grid sm:grid-cols-2 xl:grid-cols-4 gap-4" id="grid"></div>
+  </section>
+
+  <!-- Log -->
+  <section class="panel p-4" aria-label="Phantom load alert log">
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="display text-lg font-bold">Phantom load alert log</h2>
+      <button class="btn" id="clearLog">Clear log</button>
+    </div>
+    <div id="log" class="flex flex-col gap-2" aria-live="polite"></div>
+  </section>
+
+  <p class="text-xs mt-4" style="color:var(--muted)">Demo clock: each 2-second tick counts as one simulated minute for energy and cost accounting, so the totals move visibly during a pitch. All readings are simulated.</p>
+</div>
+
+<script>
+(() => {
+  const VOLTS = 230, TICK_MS = 2000, EXIT_SECONDS = 5, MAX_POINTS = 30;
+  const BASE_KWH = 5.284, BASE_COST = 33.8;          // consumption before the demo started today
+  const SHIFT_KWH_PER_DAY = 3.2, AVG_RATE = 6.5;      // for savings projection
+  const $ = id => document.getElementById(id);
+
+  const plugs = [
+    { id:'ac',  name:'Living Room Air Conditioner', room:'Living Room', base:1500, jit:.07, tag:'Heavy load' },
+    { id:'fan', name:'Bedroom Ceiling Fan & Light', room:'Bedroom',     base:75,   jit:.05, tag:'Light load' },
+    { id:'desk',name:'Study Desk & Laptop Charger', room:'Study Room',  base:120,  jit:.12, tag:'Medium load' },
+    { id:'fridge',name:'Kitchen Refrigerator',      room:'Kitchen',     base:180,  jit:.04, tag:'Cyclic load', cyclic:true, phase:0 }
+  ];
+  plugs.forEach(p => Object.assign(p, { on:true, occupied:true, deadline:null, w:0, auto:false }));
+
+  let tick = 0, seconds = 0, kwh = BASE_KWH, cost = BASE_COST, wasteKwh = 0;
+  let hallwayOnline = false;
+
+  /* ---------- Tariff ---------- */
+  const rateAt = h => (h >= 22 || h < 6) ? 4.5 : (h >= 18 ? 9 : 6.5);
+  const bandOf = h => (h >= 22 || h < 6) ? 'g' : (h >= 18 ? 'r' : 'a');
+  const bandName = { g:'Off-peak', a:'Standard', r:'Peak' };
+  const bandColor = { g:'var(--green)', a:'var(--amber)', r:'var(--red)' };
+
+  /* ---------- Simulation ---------- */
+  function sample(p) {
+    if (!p.on) return 0;
+    let v = p.base;
+    if (p.cyclic) v = ((tick + p.phase) % 24) < 12 ? p.base : 7;   // compressor cycle ~24 s
+    const j = 1 + (Math.random() - .5) * 2 * p.jit;
+    return Math.max(0, v * j);
+  }
+  const total = () => plugs.reduce((s, p) => s + p.w, 0);
+
+  /* ---------- Log ---------- */
+  function log(msg, level = '') {
+    const el = document.createElement('div');
+    el.className = 'log-item text-sm ' + level;
+    const t = new Date().toLocaleTimeString('en-IN', { hour12: false });
+    el.innerHTML = '<span style="color:var(--muted)">' + t + '</span> &nbsp;' + msg;
+    const box = $('log');
+    box.prepend(el);
+    while (box.children.length > 40) box.lastChild.remove();
+  }
+
+  /* ---------- Build cards ---------- */
+  $('grid').innerHTML = plugs.map(p => `
+    <article class="panel p-4 flex flex-col gap-3" id="card-${p.id}">
+      <div class="flex items-start justify-between gap-3">
+        <div>
+          <h3 class="display font-bold leading-snug">${p.name}</h3>
+          <p class="text-xs" style="color:var(--muted)">${p.tag} · about ${p.base} W</p>
+        </div>
+        <button class="sw" role="switch" aria-checked="true" aria-label="Power ${p.name}" id="sw-${p.id}"></button>
+      </div>
+      <div class="flex items-center gap-2 text-sm"><span class="led g" id="led-${p.id}"></span><span id="state-${p.id}">Relay on</span></div>
+      <div class="grid grid-cols-2 gap-2">
+        <div class="rounded-lg p-2" style="background:#0f1c23"><p class="text-xs" style="color:var(--muted)">Current</p><p class="display text-xl font-bold"><span id="a-${p.id}">0.00</span> A</p></div>
+        <div class="rounded-lg p-2" style="background:#0f1c23"><p class="text-xs" style="color:var(--muted)">Power</p><p class="display text-xl font-bold"><span id="w-${p.id}">0</span> W</p></div>
+      </div>
+      <div class="flex items-center justify-between text-sm"><span style="color:var(--muted)">Occupancy sensor</span><span class="pill" id="pir-${p.id}"></span></div>
+      <div>
+        <div class="bar" aria-hidden="true"><i id="bar-${p.id}"></i></div>
+        <p class="text-xs mt-1 h-4" id="cd-${p.id}" style="color:var(--warn)"></p>
+      </div>
+      <button class="btn" id="exit-${p.id}">Simulate exit</button>
+    </article>`).join('');
+
+  function renderPlug(p) {
+    const counting = p.deadline !== null;
+    $('sw-' + p.id).setAttribute('aria-checked', p.on);
+    const led = $('led-' + p.id);
+    led.className = 'led ' + (counting ? 'a' : (p.on ? 'g' : 'r'));
+    $('state-' + p.id).textContent = counting ? 'Room empty, relay closing' : (p.on ? 'Relay on' : 'Relay off');
+    $('w-' + p.id).textContent = Math.round(p.w);
+    $('a-' + p.id).textContent = (p.w / VOLTS).toFixed(2);
+    const pir = $('pir-' + p.id);
+    pir.textContent = p.occupied ? 'PIR active' : 'PIR idle';
+    pir.style.background = p.occupied ? 'rgba(61,220,151,.15)' : 'rgba(143,171,178,.15)';
+    pir.style.color = p.occupied ? 'var(--green)' : 'var(--muted)';
+    const b = $('exit-' + p.id);
+    b.textContent = counting ? 'Cancel: person returned' : (p.occupied ? 'Simulate exit' : 'Simulate entry');
+    b.classList.toggle('warn', counting);
+  }
+
+  function renderTotals() {
+    const w = total();
+    $('mPower').textContent = Math.round(w).toLocaleString('en-IN');
+    $('mAmps').textContent = (w / VOLTS).toFixed(2) + ' A at ' + VOLTS + ' V';
+    $('mKwh').textContent = kwh.toFixed(3);
+    $('mCost').textContent = cost.toFixed(2);
+    const h = new Date().getHours();
+    $('mRate').textContent = 'Current rate ₹' + rateAt(h).toFixed(2) + '/kWh · ' + bandName[bandOf(h)];
+    const online = 4 + (hallwayOnline ? 1 : 0);
+    $('mNodes').textContent = online + '/5';
+    const leds = plugs.map(() => 'g').concat([hallwayOnline ? 'g' : 'r']);
+    $('nodeLeds').innerHTML = leds.map(c => '<span class="led ' + c + '"></span>').join('');
+    const shift = Math.round(SHIFT_KWH_PER_DAY * (9 - 4.5) * 30);
+    const waste = Math.round((0.9 + wasteKwh) * 30 * AVG_RATE);
+    $('sShift').textContent = shift.toLocaleString('en-IN');
+    $('sWaste').textContent = waste.toLocaleString('en-IN');
+    $('mSave').textContent = (shift + waste).toLocaleString('en-IN');
+  }
+
+  function refresh() { plugs.forEach(renderPlug); renderTotals(); }
+
+  /* ---------- Interactions ---------- */
+  plugs.forEach(p => {
+    $('sw-' + p.id).addEventListener('click', () => {
+      p.on = !p.on;
+      if (!p.on && p.deadline !== null) { p.deadline = null; setBar(p, 0); }
+      p.w = sample(p);
+      log(p.name + ' switched ' + (p.on ? 'ON' : 'OFF') + ' manually', p.on ? 'ok' : '');
+      refresh();
+    });
+
+    $('exit-' + p.id).addEventListener('click', () => {
+      if (p.deadline !== null) {                       // person came back during countdown
+        p.deadline = null; p.occupied = true; setBar(p, 0);
+        log('Presence detected in ' + p.room + ' → automatic shut-off cancelled', 'ok');
+      } else if (p.occupied) {                         // person leaves
+        p.occupied = false;
+        if (p.on) {
+          p.deadline = Date.now() + EXIT_SECONDS * 1000;
+          log('PIR idle in ' + p.room + ' → relay will turn OFF in ' + EXIT_SECONDS + ' s', 'warn');
+          if (p.cyclic) log('Note: ' + p.name + ' is a food-safety load; consider a protected-load rule in production', 'warn');
+        } else {
+          log('PIR idle in ' + p.room + ' → relay already OFF, nothing to cut', '');
+        }
+      } else {                                         // person enters
+        p.occupied = true;
+        log('PIR active in ' + p.room + (p.on ? '' : ' → relay stays OFF until switched on'), p.on ? 'ok' : '');
+      }
+      refresh();
+    });
+  });
+
+  $('clearLog').addEventListener('click', () => { $('log').innerHTML = ''; });
+
+  function setBar(p, pct) { $('bar-' + p.id).style.width = pct + '%'; $('cd-' + p.id).textContent = pct ? '' : ''; }
+
+  /* Countdown loop (200 ms) drives the 5-second auto cut-off */
+  setInterval(() => {
+    const now = Date.now();
+    plugs.forEach(p => {
+      if (p.deadline === null) return;
+      const left = p.deadline - now;
+      if (left <= 0) {
+        const drawn = Math.round(p.w);
+        p.deadline = null; p.on = false; p.auto = true;
+        setBar(p, 0); $('cd-' + p.id).textContent = '';
+        wasteKwh += (drawn * 1.5) / 1000;              // credit: assume room stays empty about 1.5 h
+        p.w = 0;
+        log('High load (' + drawn + ' W) detected in empty ' + p.room + ' → Relay turned OFF automatically', 'bad');
+        refresh();
+      } else {
+        $('bar-' + p.id).style.width = ((1 - left / (EXIT_SECONDS * 1000)) * 100) + '%';
+        $('cd-' + p.id).textContent = 'Relay turns off in ' + Math.ceil(left / 1000) + ' s';
+      }
+    });
+  }, 200);
+
+  /* ---------- Chart ---------- */
+  const ctx = $('chart').getContext('2d');
+  const grad = ctx.createLinearGradient(0, 0, 0, 280);
+  grad.addColorStop(0, 'rgba(245,184,61,.35)'); grad.addColorStop(1, 'rgba(245,184,61,0)');
+  const chart = new Chart(ctx, {
+    type: 'line',
+    data: { labels: [], datasets: [{ label: 'Live power (W)', data: [], borderColor: '#f5b83d', backgroundColor: grad, fill: true, tension: .4, borderWidth: 2.5, pointRadius: 0, pointHoverRadius: 5 }] },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: { duration: 500 },
+      interaction: { mode: 'index', intersect: false },
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => ' ' + Math.round(c.parsed.y) + ' W' } } },
+      scales: {
+        x: { title: { display: true, text: 'Time (seconds)', color: '#8fabb2' }, ticks: { color: '#8fabb2', maxTicksLimit: 8 }, grid: { color: 'rgba(37,64,75,.5)' } },
+        y: { beginAtZero: true, title: { display: true, text: 'Power (W)', color: '#8fabb2' }, ticks: { color: '#8fabb2' }, grid: { color: 'rgba(37,64,75,.5)' } }
+      }
+    }
+  });
+
+  /* ---------- Main tick ---------- */
+  function step() {
+    tick++; seconds += TICK_MS / 1000;
+    plugs.forEach(p => { p.w = sample(p); });
+    const w = total();
+    const kwhStep = (w * 60) / 3600000;                // one tick = one simulated minute
+    kwh += kwhStep;
+    cost += kwhStep * rateAt(new Date().getHours());
+    chart.data.labels.push(seconds + 's');
+    chart.data.datasets[0].data.push(Math.round(w));
+    if (chart.data.labels.length > MAX_POINTS) { chart.data.labels.shift(); chart.data.datasets[0].data.shift(); }
+    chart.update();
+    if (Math.random() < 0.06) {                        // fifth node occasionally drops and reconnects
+      hallwayOnline = !hallwayOnline;
+      log('Hallway plug node ' + (hallwayOnline ? 'reconnected to gateway' : 'went offline (Wi-Fi signal lost)'), hallwayOnline ? 'ok' : 'warn');
+    }
+    refresh();
+  }
+
+  /* ---------- Tariff chart + clock ---------- */
+  function drawTod() {
+    const h = new Date().getHours();
+    $('tod').innerHTML = Array.from({ length: 24 }, (_, i) => {
+      const r = rateAt(i), c = bandColor[bandOf(i)];
+      return '<div title="' + i + ':00 · ₹' + r.toFixed(2) + '/kWh" style="flex:1;height:' + (r / 9 * 100) + '%;background:' + c + ';opacity:' + (i === h ? 1 : .55) + ';border-radius:3px;' + (i === h ? 'outline:2px solid #fff;outline-offset:1px' : '') + '"></div>';
+    }).join('');
+    const b = bandOf(h), badge = $('todBadge');
+    badge.textContent = bandName[b] + ' now · ₹' + rateAt(h).toFixed(2);
+    badge.style.background = 'rgba(255,255,255,.07)'; badge.style.color = bandColor[b];
+  }
+  function drawClock() {
+    $('clock').textContent = new Date().toLocaleString('en-IN', { weekday: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+  }
+
+  /* ---------- Boot ---------- */
+  plugs.forEach(p => { p.w = sample(p); });
+  drawTod(); drawClock(); refresh();
+  log('Gateway online: 4 of 5 plug nodes reporting', 'ok');
+  log('Automatic cut-off armed: relay opens ' + EXIT_SECONDS + ' s after the room is empty', '');
+  chart.data.labels.push('0s'); chart.data.datasets[0].data.push(Math.round(total())); chart.update();
+  setInterval(step, TICK_MS);
+  setInterval(drawClock, 1000);
+  setInterval(drawTod, 60000);
+})();
+</script>
+</body>
+</html>
